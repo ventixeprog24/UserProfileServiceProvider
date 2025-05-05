@@ -1,5 +1,4 @@
-﻿
-
+﻿using UserProfileServiceProvider;
 using UserProfileServiceProvider.Data.Entities;
 
 namespace UserProfileService.Factories;
