@@ -7,6 +7,7 @@ builder.Services.AddDbContext<DataContext>(x =>
     x.UseSqlServer(builder.Configuration.GetConnectionString("UserProfileDb")));
 
 builder.Services.AddGrpc();
+builder.Services.AddMemoryCache();
 
 var app = builder.Build();
 

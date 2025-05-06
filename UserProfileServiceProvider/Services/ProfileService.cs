@@ -1,79 +1,117 @@
 ﻿using Grpc.Core;
 using Microsoft.EntityFrameworkCore;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Caching.Memory;
 using UserProfileService.Factories;
 using UserProfileServiceProvider;
 using UserProfileServiceProvider.Data.Contexts;
+using UserProfileServiceProvider.Data.Entities;
 
 namespace UserProfileService.Services;
 
-public class ProfileService(DataContext context) : UserProfileServiceProvider.UserProfileService.UserProfileServiceBase
+public class ProfileService(DataContext context, IMemoryCache cache) : UserProfileServiceProvider.UserProfileService.UserProfileServiceBase
 {
     private readonly DataContext _dbContext = context;
+    private readonly IMemoryCache _cache = cache;
+    private const string _cacheKey = "Profiles";
 
-    public override Task<UserProfileReply> CreateUserProfile(UserProfile request, ServerCallContext context)
+    public override async Task<UserProfileReply> CreateUserProfile(UserProfile request, ServerCallContext context)
     {
         var userProfileEntity = UserProfileFactory.ToEntity(request);
         if (userProfileEntity is null)
-            return Task.FromResult(new UserProfileReply
+            return new UserProfileReply
             {
                 StatusCode = 400,
                 Message = "Bad Request"
-            });
+            };
 
         try
         {
             _dbContext.UserProfiles.Add(userProfileEntity);
-            _dbContext.SaveChanges();
+            await _dbContext.SaveChangesAsync();
 
-            return Task.FromResult(new UserProfileReply
+            _cache.Remove(_cacheKey);
+
+            return new UserProfileReply
             {
                 StatusCode = 201,
                 Message = "User Profile Created"
-            });
+            };
         }
         catch
         {
-            return Task.FromResult(new UserProfileReply
+            return new UserProfileReply
             {
                 StatusCode = 500,
                 Message = "Internal Server Error"
-            });
+            };
         }
-
     }
 
-    public override Task<RequestByUserIdReply> GetUserProfileById(RequestByUserId request, ServerCallContext context)
+    public override async Task<RequestByUserIdReply> GetUserProfileById(RequestByUserId request, ServerCallContext context)
     {
-        try
-        {
-            var userEntity = _dbContext.UserProfiles.Include(u => u.UserAddress).SingleOrDefault(u => u.Id == request.UserId);
-
-            var userProfile = UserProfileFactory.ToModel(userEntity);
-
-            return Task.FromResult(new RequestByUserIdReply
+        if (string.IsNullOrWhiteSpace(request.UserId))
+            return new RequestByUserIdReply
             {
-                StatusCode = 200,
-                Profile = userProfile,
-            });
-        }
-        catch
+                StatusCode = 400,
+            };
+
+        UserProfileEntity userProfileEntity = new();
+        UserProfile userProfile = new();
+
+        if (_cache.TryGetValue(_cacheKey, out List<UserProfileEntity>? cachedItems))
         {
-            return Task.FromResult(new RequestByUserIdReply
+            userProfileEntity = cachedItems.FirstOrDefault(u => u.Id == request.UserId);
+            if (userProfileEntity is not null)
             {
-                StatusCode = 404,
-            });
+                userProfile = UserProfileFactory.ToModel(userProfileEntity);
+                return new RequestByUserIdReply
+                {
+                    StatusCode = 200,
+                    Profile = userProfile
+                };
+            }
         }
 
+        var userProfileList = await UpdateCacheAsync();
+
+        userProfileEntity = userProfileList.FirstOrDefault(u => u.Id == request.UserId);
+        if (userProfileEntity is null)
+            return new RequestByUserIdReply
+            {
+                StatusCode = 404
+            };
+
+        userProfile = UserProfileFactory.ToModel(userProfileEntity);
+        if (userProfile is null)
+            return new RequestByUserIdReply
+            {
+                StatusCode = 500,
+            };
+
+        return new RequestByUserIdReply
+        {
+            StatusCode = 200,
+            Profile = userProfile
+        };
     }
 
     public override async Task<Profiles> GetAllUserProfiles(Empty request, ServerCallContext context)
     {
-        var entities = await _dbContext.UserProfiles.Include(u => u.UserAddress).ToListAsync();
-
-        //GPT generated solution to get the list with correct models working with the gRPC return.
         Profiles profiles = new();
-        profiles.AllUserProfiles.AddRange(entities.Select(e => UserProfileFactory.ToModel(e)));
+
+        if (_cache.TryGetValue(_cacheKey, out List<UserProfileEntity>? cachedItems))
+        {
+            profiles.AllUserProfiles.AddRange(cachedItems.Select(entity => UserProfileFactory.ToModel(entity)));
+            return profiles;
+        }
+
+        var userProfileEntities = await UpdateCacheAsync();
+
+        if (userProfileEntities is null)
+            return profiles;
+
+        profiles.AllUserProfiles.AddRange(userProfileEntities.Select(entity => UserProfileFactory.ToModel(entity)));
 
         return profiles;
     }
@@ -93,6 +131,8 @@ public class ProfileService(DataContext context) : UserProfileServiceProvider.Us
 
         _dbContext.UserProfiles.Update(updatedEntity);
         await _dbContext.SaveChangesAsync();
+
+        _cache.Remove(_cacheKey);
 
         return new UserProfileReply
         {
@@ -125,10 +165,24 @@ public class ProfileService(DataContext context) : UserProfileServiceProvider.Us
 
         await _dbContext.SaveChangesAsync();
 
+        _cache.Remove(_cacheKey);
+
         return new UserProfileReply
         {
             StatusCode = 200,
             Message = "User successfully deleted"
         };
+    }
+
+    public async Task<List<UserProfileEntity>?> UpdateCacheAsync()
+    {
+        _cache.Remove(_cacheKey);
+
+        var result = await _dbContext.UserProfiles.Include(u => u.UserAddress).ToListAsync();
+        if (result is null || result.Count == 0)
+            return [];
+
+        _cache.Set(_cacheKey, result, TimeSpan.FromHours(12));
+        return result;
     }
 }
