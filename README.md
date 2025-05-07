@@ -7,6 +7,7 @@ Make sure you have an exact copy of the proto-file in the client application. Do
 ### Install following packages in the client:
 - Google.Protobuf
 - Grpc.Net.Client
+- Grpc.Net.ClientFactory
 - Grpc.Tools
 
 ### Example use
