@@ -54,3 +54,23 @@ var deleteReply = await client.DeleteUserAsync(new RequestByUserId {
   UserId = "the-same-guid-used-above"
   });
 ```
+
+### Possible Return Codes
+| Method                 | StatusCode | Message                              | Meaning                                                    |
+| ---------------------- | :--------: | ------------------------------------ | ---------------------------------------------------------- |
+| **CreateUserProfile**  |     201    | “User Profile Created”               | Successfully created a new profile                         |
+|                        |     400    | “Bad Request”                        | Payload was invalid (factory returned `null`)              |
+|                        |     500    | “Internal Server Error”              | Exception occurred while saving or caching                 |
+| **GetUserProfileById** |     200    | –                                    | Profile found; returned in `Profile` field                 |
+|                        |     400    | –                                    | `UserId` was null, empty, or whitespace                    |
+|                        |     404    | –                                    | No profile exists with the given `UserId`                  |
+|                        |     500    | –                                    | Exception during mapping from entity to model              |
+| **GetAllUserProfiles** |      –     | –                                    | Always returns a `Profiles` message; may be empty on error |
+| **UpdateUser**         |     200    | “User profile updated successfully.” | Successfully updated existing profile                      |
+|                        |     404    | “Not found.”                         | No existing profile with the given `UserId`                |
+|                        |     500    | “Internal server error”              | Exception occurred while loading, updating, or saving      |
+| **DeleteUser**         |     200    | “User successfully deleted”          | Successfully removed the profile and its address           |
+|                        |     400    | “Bad request”                        | `UserId` was null, empty, or whitespace                    |
+|                        |     404    | “Not found”                          | No profile or address found for the given `UserId`         |
+|                        |     500    | “Internal server error”              | Exception occurred during lookup or deletion               |
+
