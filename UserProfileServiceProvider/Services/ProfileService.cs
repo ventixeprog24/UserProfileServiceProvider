@@ -58,7 +58,6 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
 
         UserProfileEntity userProfileEntity = new();
         UserProfile userProfile = new();
-
         if (_cache.TryGetValue(_cacheKey, out List<UserProfileEntity>? cachedItems))
         {
             userProfileEntity = cachedItems.FirstOrDefault(u => u.Id == request.UserId);
@@ -118,19 +117,30 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
 
     public override async Task<UserProfileReply> UpdateUser(UserProfile request, ServerCallContext context)
     {
-        var oldEntity = await _dbContext.UserProfiles.Include(u => u.UserAddress)
-            .FirstOrDefaultAsync(u => u.Id == request.UserId);
-        if (oldEntity is null)
+        try
+        {
+            var oldEntity = await _dbContext.UserProfiles.Include(u => u.UserAddress)
+                .FirstOrDefaultAsync(u => u.Id == request.UserId);
+            if (oldEntity is null)
+                return new UserProfileReply
+                {
+                    StatusCode = 404,
+                    Message = "Not found."
+                };
+
+            var updatedEntity = UserProfileFactory.UpdateEntity(request, oldEntity);
+
+            _dbContext.UserProfiles.Update(updatedEntity);
+            await _dbContext.SaveChangesAsync();
+        }
+        catch
+        {
             return new UserProfileReply
             {
-                StatusCode = 404,
-                Message = "Not found."
+                StatusCode = 500,
+                Message = "Internal server error"
             };
-
-        var updatedEntity = UserProfileFactory.UpdateEntity(request, oldEntity);
-
-        _dbContext.UserProfiles.Update(updatedEntity);
-        await _dbContext.SaveChangesAsync();
+        }
 
         _cache.Remove(_cacheKey);
 
@@ -143,27 +153,46 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
 
     public override async Task<UserProfileReply> DeleteUser(RequestByUserId request, ServerCallContext context)
     {
-        var userToDelete = await _dbContext.UserProfiles.FirstOrDefaultAsync(u => u.Id == request.UserId);
-        if (userToDelete is null)
+        if (string.IsNullOrWhiteSpace(request.UserId))
             return new UserProfileReply
             {
-                StatusCode = 404,
-                Message = "Not found"
+                StatusCode = 400,
+                Message = "Bad request"
             };
 
-        var userAddressToDelete =
-            await _dbContext.UserProfileAddresses.FirstOrDefaultAsync(a => a.UserId == request.UserId);
-        if (userAddressToDelete is null)
+        try
+        {
+            var userToDelete = await _dbContext.UserProfiles.FirstOrDefaultAsync(u => u.Id == request.UserId);
+            if (userToDelete is null)
+                return new UserProfileReply
+                {
+                    StatusCode = 404,
+                    Message = "Not found"
+                };
+
+            var userAddressToDelete =
+                await _dbContext.UserProfileAddresses.FirstOrDefaultAsync(a => a.UserId == request.UserId);
+            if (userAddressToDelete is null)
+                return new UserProfileReply
+                {
+                    StatusCode = 404,
+                    Message = "Not found"
+                };
+
+            _dbContext.UserProfileAddresses.Remove(userAddressToDelete);
+            _dbContext.UserProfiles.Remove(userToDelete);
+
+            await _dbContext.SaveChangesAsync();
+        }
+        catch
+        {
             return new UserProfileReply
             {
-                StatusCode = 404,
-                Message = "Not found"
+                StatusCode = 500,
+                Message = "Internal server error"
             };
-
-        _dbContext.UserProfileAddresses.Remove(userAddressToDelete);
-        _dbContext.UserProfiles.Remove(userToDelete);
-
-        await _dbContext.SaveChangesAsync();
+        }
+        
 
         _cache.Remove(_cacheKey);
 
@@ -178,11 +207,20 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
     {
         _cache.Remove(_cacheKey);
 
-        var result = await _dbContext.UserProfiles.Include(u => u.UserAddress).ToListAsync();
-        if (result is null || result.Count == 0)
-            return [];
+        List<UserProfileEntity> returnList = [];
 
-        _cache.Set(_cacheKey, result, TimeSpan.FromHours(12));
-        return result;
+        try
+        {
+            returnList = await _dbContext.UserProfiles.Include(u => u.UserAddress).ToListAsync();
+            if (returnList is null || returnList.Count == 0)
+                return returnList;
+        }
+        catch
+        {
+            return returnList;
+        }
+
+        _cache.Set(_cacheKey, returnList, TimeSpan.FromHours(12));
+        return returnList;
     }
 }
