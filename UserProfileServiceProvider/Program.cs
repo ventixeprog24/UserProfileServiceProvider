@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using UserProfileService.Services;
 using UserProfileServiceProvider.Data.Contexts;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,7 +12,7 @@ builder.Services.AddMemoryCache();
 
 var app = builder.Build();
 
-// app.MapGrpcService<ProfileService>();
+app.MapGrpcService<ProfileService>();
 app.MapGet("/",
     () =>
         "Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
