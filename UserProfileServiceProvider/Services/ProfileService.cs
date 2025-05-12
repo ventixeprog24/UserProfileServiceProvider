@@ -1,17 +1,16 @@
-﻿using Grpc.Core;
-using Microsoft.EntityFrameworkCore;
-using Google.Protobuf.WellKnownTypes;
+﻿using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
 using Microsoft.Extensions.Caching.Memory;
 using UserProfileService.Factories;
 using UserProfileServiceProvider;
-using UserProfileServiceProvider.Data.Contexts;
 using UserProfileServiceProvider.Data.Entities;
+using UserProfileServiceProvider.Data.Repositories;
 
 namespace UserProfileService.Services;
 
-public class ProfileService(DataContext context, IMemoryCache cache) : UserProfileServiceProvider.UserProfileService.UserProfileServiceBase
+public class ProfileService(IUserProfileRepository repository, IMemoryCache cache) : UserProfileServiceProvider.UserProfileService.UserProfileServiceBase
 {
-    private readonly DataContext _dbContext = context;
+    private readonly IUserProfileRepository _repository = repository;
     private readonly IMemoryCache _cache = cache;
     private const string _cacheKey = "Profiles";
 
@@ -25,27 +24,21 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
                 Message = "Bad Request"
             };
 
-        try
-        {
-            _dbContext.UserProfiles.Add(userProfileEntity);
-            await _dbContext.SaveChangesAsync();
-
-            _cache.Remove(_cacheKey);
-
-            return new UserProfileReply
-            {
-                StatusCode = 201,
-                Message = "User Profile Created"
-            };
-        }
-        catch
-        {
+        var result = await _repository.CreateUserProfile(userProfileEntity);
+        if (result is null || !result.Succeeded)
             return new UserProfileReply
             {
                 StatusCode = 500,
                 Message = "Internal Server Error"
             };
-        }
+
+        _cache.Remove(_cacheKey);
+
+        return new UserProfileReply
+        {
+            StatusCode = 201,
+            Message = "User Profile Created"
+        };
     }
 
     public override async Task<RequestByUserIdReply> GetUserProfileById(RequestByUserId request, ServerCallContext context)
@@ -117,23 +110,18 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
 
     public override async Task<UserProfileReply> UpdateUser(UserProfile request, ServerCallContext context)
     {
-        try
-        {
-            var oldEntity = await _dbContext.UserProfiles.Include(u => u.UserAddress)
-                .FirstOrDefaultAsync(u => u.Id == request.UserId);
-            if (oldEntity is null)
-                return new UserProfileReply
-                {
-                    StatusCode = 404,
-                    Message = "Not found."
-                };
+        var oldEntityResult = await _repository.GetUserProfileById(request.UserId);
+        if (oldEntityResult is null || !oldEntityResult.Succeeded)
+            return new UserProfileReply
+            {
+                StatusCode = 404,
+                Message = "Not found."
+            };
 
-            var updatedEntity = UserProfileFactory.UpdateEntity(request, oldEntity);
+        var updatedEntity = UserProfileFactory.UpdateEntity(request, oldEntityResult.UserProfile!);
 
-            _dbContext.UserProfiles.Update(updatedEntity);
-            await _dbContext.SaveChangesAsync();
-        }
-        catch
+        var updateResult = await _repository.UpdateUserProfile(updatedEntity);
+        if (updateResult is null || !updateResult.Succeeded)
         {
             return new UserProfileReply
             {
@@ -160,39 +148,14 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
                 Message = "Bad request"
             };
 
-        try
-        {
-            var userToDelete = await _dbContext.UserProfiles.FirstOrDefaultAsync(u => u.Id == request.UserId);
-            if (userToDelete is null)
-                return new UserProfileReply
-                {
-                    StatusCode = 404,
-                    Message = "Not found"
-                };
 
-            var userAddressToDelete =
-                await _dbContext.UserProfileAddresses.FirstOrDefaultAsync(a => a.UserId == request.UserId);
-            if (userAddressToDelete is null)
-                return new UserProfileReply
-                {
-                    StatusCode = 404,
-                    Message = "Not found"
-                };
-
-            _dbContext.UserProfileAddresses.Remove(userAddressToDelete);
-            _dbContext.UserProfiles.Remove(userToDelete);
-
-            await _dbContext.SaveChangesAsync();
-        }
-        catch
-        {
+        var deleteResult = await _repository.DeleteUserProfile(request.UserId);
+        if (deleteResult is null || !deleteResult.Succeeded)
             return new UserProfileReply
             {
                 StatusCode = 500,
-                Message = "Internal server error"
+                Message = "Not found"
             };
-        }
-        
 
         _cache.Remove(_cacheKey);
 
@@ -203,22 +166,17 @@ public class ProfileService(DataContext context, IMemoryCache cache) : UserProfi
         };
     }
 
-    public async Task<List<UserProfileEntity>?> UpdateCacheAsync()
+    public async Task<IEnumerable<UserProfileEntity>?> UpdateCacheAsync()
     {
         _cache.Remove(_cacheKey);
 
-        List<UserProfileEntity> returnList = [];
+        IEnumerable<UserProfileEntity> returnList = [];
 
-        try
-        {
-            returnList = await _dbContext.UserProfiles.Include(u => u.UserAddress).ToListAsync();
-            if (returnList is null || returnList.Count == 0)
-                return returnList;
-        }
-        catch
-        {
+        var returnResult = await _repository.GetAllUserProfiles();
+        if (returnResult is null || !returnResult.Succeeded)
             return returnList;
-        }
+
+        returnList = returnResult.AllUserProfiles!;
 
         _cache.Set(_cacheKey, returnList, TimeSpan.FromHours(12));
         return returnList;

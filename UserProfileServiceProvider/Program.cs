@@ -1,11 +1,13 @@
 using Microsoft.EntityFrameworkCore;
 using UserProfileService.Services;
 using UserProfileServiceProvider.Data.Contexts;
+using UserProfileServiceProvider.Data.Repositories;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddDbContext<DataContext>(x =>
     x.UseSqlServer(builder.Configuration.GetConnectionString("UserProfileDb")));
+builder.Services.AddScoped<IUserProfileRepository, UserProfileRepository>();
 
 builder.Services.AddGrpc();
 builder.Services.AddMemoryCache();
