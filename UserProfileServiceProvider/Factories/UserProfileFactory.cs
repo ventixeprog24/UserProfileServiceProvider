@@ -47,6 +47,9 @@ public class UserProfileFactory
 
     public static UserProfile ToModel(UserProfileEntity userProfileEntity)
     {
+        if (userProfileEntity is null)
+            return null;
+        
         UserProfile userProfile = new()
         {
             UserId = userProfileEntity.Id,
