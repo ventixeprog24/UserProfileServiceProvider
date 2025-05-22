@@ -2,6 +2,8 @@ Partly AI Generated.
 
 # UserProfileServiceProvider
 
+This Microservice will handle all user profile information connected to a registered user in the Ventixe system and store it in a SQL database on Azure.
+
 ## How to use it
 
 Make sure you have an exact copy of the proto-file in the client application. Don't forget to register the proto in the project.
